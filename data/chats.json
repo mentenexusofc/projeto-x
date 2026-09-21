@@ -1,0 +1,12 @@
+[
+  {
+    "id": "chat-2f890ed2-02d4-49bf-a2ff-b1e795e7d960",
+    "title": "Operação Alfa 1",
+    "modelName": "gemini-2.5-flash",
+    "customInstructions": "",
+    "activeFiles": [],
+    "messages": [],
+    "createdAt": "2026-09-21T22:03:44.244Z",
+    "updatedAt": "2026-09-21T22:03:44.244Z"
+  }
+]

@@ -8,7 +8,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <!-- Markdown parser and highlight.js -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
@@ -95,49 +94,79 @@
     <!-- CORPO PRINCIPAL -->
     <main class="app-body">
 
-      <!-- SIDEBAR: ARQUIVOS & DOSSIÊS DE CONTEXTO -->
+      <!-- SIDEBAR MULTI-PAINEL (CHATS & PASTAS) -->
       <aside class="sidebar" id="sidebar">
-        <div class="sidebar-header">
-          <div class="sidebar-title">
+        
+        <!-- Botão Principal: Novo Chat -->
+        <button id="btn-new-chat" class="btn-new-chat">
+          <i class="fa-solid fa-plus"></i>
+          <span>Nova Conversa</span>
+        </button>
+
+        <!-- Navegador de Abas da Sidebar -->
+        <div class="sidebar-tabs">
+          <button id="tab-btn-chats" class="sidebar-tab active">
+            <i class="fa-solid fa-comments"></i>
+            <span>Conversas</span>
+          </button>
+          <button id="tab-btn-folders" class="sidebar-tab">
             <i class="fa-solid fa-folder-tree"></i>
-            <h3>Dossiês da Missão</h3>
-          </div>
-          <span id="active-files-count" class="badge-counter" title="Arquivos ativos para a IA">0</span>
+            <span>Pastas & Arquivos</span>
+            <span id="active-files-count" class="tab-badge" title="Arquivos ativos na IA">0</span>
+          </button>
         </div>
 
-        <p class="sidebar-desc">Envie PDFs, planilhas, relatórios ou códigos para a IA ler e apoiar na sua missão.</p>
-
-        <!-- Dropzone de Upload -->
-        <div id="dropzone" class="upload-dropzone">
-          <input type="file" id="file-input" class="hidden-input" multiple accept=".pdf,.txt,.md,.csv,.json,.xml,.js,.py,.doc,.docx">
-          <i class="fa-solid fa-cloud-arrow-up drop-icon"></i>
-          <p class="drop-text"><strong>Arraste documentos aqui</strong> ou clique para navegar</p>
-          <span class="drop-formats">PDF, TXT, MD, CSV, JSON (até 35MB)</span>
-          <div id="upload-progress" class="upload-progress hidden">
-            <div class="progress-bar-fill" id="progress-bar-fill"></div>
+        <!-- ABA 1: LISTA DE CHATS -->
+        <div id="tab-content-chats" class="tab-content active">
+          <div class="chats-section-header">
+            <span>HISTÓRICO DE SESSÕES</span>
+            <span id="total-chats-count" class="badge-subtle">0</span>
+          </div>
+          <div id="chats-list" class="chats-list">
+            <!-- Chats renderizados via app.js -->
           </div>
         </div>
 
-        <!-- Lista de Arquivos -->
-        <div class="files-section">
-          <div class="files-header">
-            <span>ARQUIVOS CARREGADOS</span>
-            <button id="btn-refresh-files" class="btn-icon" title="Atualizar lista">
-              <i class="fa-solid fa-rotate-right"></i>
+        <!-- ABA 2: PASTAS E ARQUIVOS -->
+        <div id="tab-content-folders" class="tab-content hidden">
+          
+          <div class="folders-toolbar">
+            <span>ORGANIZAÇÃO</span>
+            <button id="btn-open-create-folder" class="btn-tool-sm" title="Criar Nova Pasta">
+              <i class="fa-solid fa-folder-plus"></i> Nova Pasta
             </button>
           </div>
-          <div id="files-list" class="files-list">
-            <div class="empty-state-files">
-              <i class="fa-regular fa-file-lines"></i>
-              <p>Nenhum documento carregado.</p>
+
+          <!-- Seletor de pasta destino para upload -->
+          <div class="upload-folder-selector">
+            <label for="select-target-folder"><i class="fa-solid fa-arrow-turn-down"></i> Pasta de destino:</label>
+            <select id="select-target-folder">
+              <option value="Geral">Geral</option>
+            </select>
+          </div>
+
+          <!-- Dropzone de Upload -->
+          <div id="dropzone" class="upload-dropzone">
+            <input type="file" id="file-input" class="hidden-input" multiple accept=".pdf,.txt,.md,.csv,.json,.xml,.js,.py,.doc,.docx">
+            <i class="fa-solid fa-cloud-arrow-up drop-icon"></i>
+            <p class="drop-text"><strong>Arraste arquivos aqui</strong> ou clique</p>
+            <span class="drop-formats">PDF, TXT, MD, CSV, JSON (até 40MB)</span>
+            <div id="upload-progress" class="upload-progress hidden">
+              <div class="progress-bar-fill" id="progress-bar-fill"></div>
             </div>
+          </div>
+
+          <!-- Árvore de Pastas & Arquivos -->
+          <div id="folders-tree" class="folders-tree">
+            <!-- Pastas e arquivos renderizados aqui -->
           </div>
         </div>
 
+        <!-- Rodapé da Sidebar -->
         <div class="sidebar-footer">
           <div class="file-summary">
             <i class="fa-solid fa-shield-halved"></i>
-            <span>Arquivos marcados são injetados automaticamente no raciocínio da IA.</span>
+            <span>Arquivos marcados são lidos e processados pelo Gemini.</span>
           </div>
         </div>
       </aside>
@@ -145,13 +174,18 @@
       <!-- ÁREA DE CHAT -->
       <section class="chat-section">
 
-        <!-- Banner de Contexto Ativo -->
-        <div id="active-context-bar" class="context-bar hidden">
-          <div class="context-info">
-            <i class="fa-solid fa-paperclip"></i>
-            <span id="context-summary-text">0 documentos anexados ao contexto</span>
+        <!-- Topo da Conversa Atual -->
+        <div class="chat-meta-bar">
+          <div class="chat-title-group">
+            <h3 id="current-chat-title">Nova Missão</h3>
+            <button id="btn-rename-current-chat" class="btn-icon-xs" title="Renomear esta conversa">
+              <i class="fa-regular fa-pen-to-square"></i>
+            </button>
           </div>
-          <button id="btn-toggle-context" class="context-action-btn">Ver Detalhes</button>
+          <div id="active-context-bar" class="context-bar-pill hidden">
+            <i class="fa-solid fa-paperclip"></i>
+            <span id="context-summary-text">0 arquivos ativos no raciocínio</span>
+          </div>
         </div>
 
         <!-- Mensagens -->
@@ -161,16 +195,16 @@
               <i class="fa-solid fa-crosshairs"></i>
             </div>
             <h2>CENTRAL OPERACIONAL PRONTA</h2>
-            <p>O Gemini está calibrado com parâmetros irrestritos e foco em resolução de problemas. Carregue os documentos de inteligência da sua missão na barra lateral ou envie suas instruções diretamente.</p>
+            <p>Selecione ou crie pastas com relatórios e planilhas, ou inicie uma conversa tática direta com a IA.</p>
             <div class="quick-prompts">
-              <button class="prompt-chip" data-prompt="Analise todos os documentos carregados e faça um resumo executivo dos pontos críticos.">
-                <i class="fa-solid fa-magnifying-glass-chart"></i> Resumo Executivo dos Arquivos
+              <button class="prompt-chip" data-prompt="Analise todos os documentos e pastas carregados e apresente um resumo executivo.">
+                <i class="fa-solid fa-magnifying-glass-chart"></i> Resumo Geral de Dossiês
               </button>
-              <button class="prompt-chip" data-prompt="Quais são as principais oportunidades e riscos identificados na documentação?">
-                <i class="fa-solid fa-triangle-exclamation"></i> Análise de Riscos e Oportunidades
+              <button class="prompt-chip" data-prompt="Identifique os principais riscos, fragilidades e oportunidades operacionais.">
+                <i class="fa-solid fa-triangle-exclamation"></i> Análise de Riscos & Oportunidades
               </button>
-              <button class="prompt-chip" data-prompt="Crie um plano tático passo a passo para cumprirmos essa missão com base no contexto.">
-                <i class="fa-solid fa-chess"></i> Criar Plano Tático Operacional
+              <button class="prompt-chip" data-prompt="Elabore um plano estratégico acionável passo a passo para cumprir essa missão.">
+                <i class="fa-solid fa-chess"></i> Criar Plano Tático
               </button>
             </div>
           </div>
@@ -183,7 +217,7 @@
               <textarea id="chat-input" placeholder="Envie suas instruções ou dúvidas para o Gemini..." rows="1" autofocus></textarea>
               
               <div class="input-actions">
-                <button type="button" id="btn-clear-chat" class="btn-tool" title="Limpar conversa">
+                <button type="button" id="btn-clear-chat" class="btn-tool" title="Limpar conversa atual">
                   <i class="fa-solid fa-trash-can"></i>
                 </button>
                 <button type="submit" id="btn-send" class="btn-send" title="Enviar Mensagem">
@@ -192,7 +226,7 @@
               </div>
             </div>
             <div class="input-hints">
-              <span><strong>Shift + Enter</strong> para nova linha. <strong>Enter</strong> para enviar.</span>
+              <span><strong>Shift + Enter</strong> para quebra de linha. <strong>Enter</strong> para enviar.</span>
               <span id="chat-status-text" class="status-ready"><i class="fa-solid fa-check"></i> Pronto</span>
             </div>
           </form>
@@ -202,6 +236,58 @@
 
     </main>
 
+  </div>
+
+  <!-- ==================== MODAL: CRIAR NOVA PASTA ==================== -->
+  <div id="modal-create-folder" class="modal-overlay hidden">
+    <div class="modal-card modal-card-sm">
+      <div class="modal-header">
+        <div class="modal-title">
+          <i class="fa-solid fa-folder-plus"></i>
+          <h3>Criar Nova Pasta</h3>
+        </div>
+        <button id="btn-close-folder-modal" class="btn-icon">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">Organize seus arquivos de inteligência em pastas temáticas (ex: Estratégia, Financeiro, Códigos).</p>
+        <div class="input-group">
+          <label for="new-folder-name">Nome da Pasta</label>
+          <input type="text" id="new-folder-name" placeholder="Ex: Operações Estratégicas" maxlength="40">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-cancel-create-folder" class="btn-ghost">Cancelar</button>
+        <button id="btn-confirm-create-folder" class="btn-primary">Criar Pasta</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: MOVER ARQUIVO ==================== -->
+  <div id="modal-move-file" class="modal-overlay hidden">
+    <div class="modal-card modal-card-sm">
+      <div class="modal-header">
+        <div class="modal-title">
+          <i class="fa-solid fa-folder-tree"></i>
+          <h3>Mover Arquivo</h3>
+        </div>
+        <button id="btn-close-move-modal" class="btn-icon">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">Selecione a pasta de destino para o arquivo <strong id="move-file-target-name"></strong>:</p>
+        <div class="input-group">
+          <label for="select-move-destination">Pasta de Destino</label>
+          <select id="select-move-destination" class="styled-select"></select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-cancel-move-file" class="btn-ghost">Cancelar</button>
+        <button id="btn-confirm-move-file" class="btn-primary">Mover</button>
+      </div>
+    </div>
   </div>
 
   <!-- ==================== MODAL DE DIRETRIZES DA MISSÃO ==================== -->
@@ -218,9 +304,9 @@
       </div>
       <div class="modal-body">
         <p class="modal-desc">
-          Defina o tom, a função ou instruções secretas prioritárias que a IA deve seguir durante a sessão. Estas diretrizes têm prioridade total sobre qualquer consulta.
+          Defina o comportamento operacional e as diretrizes prioritárias da IA para esta conversa.
         </p>
-        <textarea id="custom-system-instructions" rows="6" placeholder="Ex: Você é o meu estrategista sênior. Responda em tópicos acionáveis, aponte brechas de mercado e nunca suavize diagnósticos..."></textarea>
+        <textarea id="custom-system-instructions" rows="6" placeholder="Ex: Você é o meu conselheiro tático sênior. Responda em tópicos acionáveis, aponte riscos ocultos e mantenha rigor analítico irrestrito..."></textarea>
       </div>
       <div class="modal-footer">
         <button id="btn-reset-directives" class="btn-ghost">Restaurar Padrão</button>
