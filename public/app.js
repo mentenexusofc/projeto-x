@@ -856,6 +856,46 @@ function notifyBanner(msg) {
   setTimeout(() => div.remove(), 2500);
 }
 
+// ==================== FORMATAÇÃO DE MENSAGENS & AGENDA ====================
+function formatMarkdownWithAgendaCards(text) {
+  if (!text) return '';
+  try {
+    const processed = text.replace(/```agenda_action\s*([\s\S]*?)```/g, (match, jsonStr) => {
+      try {
+        const data = JSON.parse(jsonStr);
+        const isCreate = data.action === 'create';
+        const isDelete = data.action === 'delete';
+        const actionName = isCreate ? 'MISSÃO AGENDADA PELA IA' : (isDelete ? 'MISSÃO EXCLUÍDA PELA IA' : 'MISSÃO ATUALIZADA PELA IA');
+        const icon = isCreate ? 'fa-calendar-check' : (isDelete ? 'fa-calendar-xmark' : 'fa-calendar-pen');
+        const title = data.titulo || (isDelete ? `ID: ${data.id}` : 'Missão Operacional');
+        const timeInfo = data.dataInicio ? new Date(data.dataInicio).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '';
+        const pasta = data.pasta ? ` • Pasta: ${data.pasta}` : '';
+
+        return `
+          <div class="ia-agenda-card">
+            <div class="ia-agenda-icon"><i class="fa-solid ${icon}"></i></div>
+            <div class="ia-agenda-details">
+              <span class="ia-agenda-tag">${actionName}</span>
+              <span class="ia-agenda-title">${escapeHtml(title)}</span>
+              ${timeInfo ? `<span class="ia-agenda-meta"><i class="fa-regular fa-clock"></i> ${timeInfo}${pasta}</span>` : ''}
+            </div>
+          </div>
+        `;
+      } catch (e) {
+        return match;
+      }
+    });
+
+    if (window.marked && typeof window.marked.parse === 'function') {
+      return marked.parse(processed);
+    }
+    return escapeHtml(processed);
+  } catch (err) {
+    console.error('Erro ao formatar mensagem:', err);
+    return window.marked ? marked.parse(text) : escapeHtml(text);
+  }
+}
+
 // ==================== CHAT & STREAMING ====================
 async function sendMessage() {
   const message = el.chatInput.value.trim();
@@ -917,7 +957,11 @@ async function sendMessage() {
               const parsed = JSON.parse(jsonStr);
               if (parsed.text) {
                 fullResponse += parsed.text;
-                contentBody.innerHTML = formatMarkdownWithAgendaCards(fullResponse);
+                try {
+                  contentBody.innerHTML = formatMarkdownWithAgendaCards(fullResponse);
+                } catch (e) {
+                  contentBody.innerHTML = escapeHtml(fullResponse);
+                }
                 addCopyButtonsToCode(contentBody);
                 el.chatMessages.scrollTop = el.chatMessages.scrollHeight;
               } else if (parsed.agenda_updated) {
@@ -935,6 +979,11 @@ async function sendMessage() {
     }
 
     contentBody.classList.remove('typing-cursor');
+    try {
+      contentBody.innerHTML = formatMarkdownWithAgendaCards(fullResponse);
+    } catch (e) {
+      contentBody.innerHTML = escapeHtml(fullResponse);
+    }
     state.chatHistory.push({ role: 'model', content: fullResponse });
 
     // Atualiza a lista de chats para refletir novo título ou contagem de mensagens
@@ -961,7 +1010,11 @@ function appendMessage(sender, text, isTyping = false) {
 
   let renderedContent = '';
   if (text) {
-    renderedContent = sender === 'model' ? formatMarkdownWithAgendaCards(text) : escapeHtml(text);
+    try {
+      renderedContent = sender === 'model' ? formatMarkdownWithAgendaCards(text) : escapeHtml(text);
+    } catch (e) {
+      renderedContent = sender === 'model' && window.marked ? marked.parse(text) : escapeHtml(text);
+    }
   }
 
   row.innerHTML = `
@@ -1234,36 +1287,67 @@ function bindEvents() {
     }
   });
 
-// Formatar markdown e converter tags de agenda da IA em cards interativos
-function formatMarkdownWithAgendaCards(text) {
-  if (!text) return '';
-  const processed = text.replace(/```agenda_action\s*([\s\S]*?)```/g, (match, jsonStr) => {
-    try {
-      const data = JSON.parse(jsonStr);
-      const isCreate = data.action === 'create';
-      const isDelete = data.action === 'delete';
-      const actionName = isCreate ? 'MISSÃO AGENDADA PELA IA' : (isDelete ? 'MISSÃO EXCLUÍDA PELA IA' : 'MISSÃO ATUALIZADA PELA IA');
-      const icon = isCreate ? 'fa-calendar-check' : (isDelete ? 'fa-calendar-xmark' : 'fa-calendar-pen');
-      const title = data.titulo || (isDelete ? `ID: ${data.id}` : 'Missão Operacional');
-      const timeInfo = data.dataInicio ? new Date(data.dataInicio).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '';
-      const pasta = data.pasta ? ` • Pasta: ${data.pasta}` : '';
+  // Agenda Modal & Calendar events
+  if (el.btnAgenda) {
+    el.btnAgenda.addEventListener('click', () => {
+      loadAgenda();
+      closeEventForm();
+      el.modalAgenda.classList.remove('hidden');
+    });
+  }
 
-      return `
-        <div class="ia-agenda-card">
-          <div class="ia-agenda-icon"><i class="fa-solid ${icon}"></i></div>
-          <div class="ia-agenda-details">
-            <span class="ia-agenda-tag">${actionName}</span>
-            <span class="ia-agenda-title">${escapeHtml(title)}</span>
-            ${timeInfo ? `<span class="ia-agenda-meta"><i class="fa-regular fa-clock"></i> ${timeInfo}${pasta}</span>` : ''}
-          </div>
-        </div>
-      `;
-    } catch (e) {
-      return match;
-    }
-  });
+  if (el.btnCloseAgendaModal) {
+    el.btnCloseAgendaModal.addEventListener('click', () => {
+      el.modalAgenda.classList.add('hidden');
+    });
+  }
 
-  return window.marked ? marked.parse(processed) : escapeHtml(processed);
+  if (el.btnCalPrev) {
+    el.btnCalPrev.addEventListener('click', () => {
+      state.calCurrentDate.setMonth(state.calCurrentDate.getMonth() - 1);
+      renderCalendar();
+    });
+  }
+
+  if (el.btnCalNext) {
+    el.btnCalNext.addEventListener('click', () => {
+      state.calCurrentDate.setMonth(state.calCurrentDate.getMonth() + 1);
+      renderCalendar();
+    });
+  }
+
+  if (el.btnCalToday) {
+    el.btnCalToday.addEventListener('click', () => {
+      state.calCurrentDate = new Date();
+      state.calSelectedDate = new Date();
+      renderCalendar();
+      renderSelectedDayEvents();
+      closeEventForm();
+    });
+  }
+
+  if (el.btnCalCreateEvent) {
+    el.btnCalCreateEvent.addEventListener('click', () => openEventForm(null));
+  }
+
+  if (el.btnQuickAddToDay) {
+    el.btnQuickAddToDay.addEventListener('click', () => openEventForm(null));
+  }
+
+  if (el.btnCancelCalForm) {
+    el.btnCancelCalForm.addEventListener('click', closeEventForm);
+  }
+
+  if (el.btnCancelEventBtn) {
+    el.btnCancelEventBtn.addEventListener('click', closeEventForm);
+  }
+
+  if (el.calEventForm) {
+    el.calEventForm.addEventListener('submit', handleEventFormSubmit);
+  }
+
+  // Save state to localStorage
+  saveState();
 }
 
 // ==================== GESTÃO DA AGENDA & GOOGLE CALENDAR ====================
@@ -1609,73 +1693,6 @@ async function deleteAgendaEvent(id) {
     console.error('Erro ao excluir evento:', err);
     alert('Erro de conexão ao excluir missão.');
   }
-}
-
-  // ==================== EVENTOS DA AGENDA & GOOGLE CALENDAR ====================
-  if (el.btnAgenda) {
-    el.btnAgenda.addEventListener('click', () => {
-      loadAgenda();
-      closeEventForm();
-      el.modalAgenda.classList.remove('hidden');
-    });
-  }
-
-  if (el.btnCloseAgendaModal) {
-    el.btnCloseAgendaModal.addEventListener('click', () => {
-      el.modalAgenda.classList.add('hidden');
-    });
-  }
-
-  if (el.btnCalPrev) {
-    el.btnCalPrev.addEventListener('click', () => {
-      state.calCurrentDate.setMonth(state.calCurrentDate.getMonth() - 1);
-      renderCalendar();
-    });
-  }
-
-  if (el.btnCalNext) {
-    el.btnCalNext.addEventListener('click', () => {
-      state.calCurrentDate.setMonth(state.calCurrentDate.getMonth() + 1);
-      renderCalendar();
-    });
-  }
-
-  if (el.btnCalToday) {
-    el.btnCalToday.addEventListener('click', () => {
-      state.calCurrentDate = new Date();
-      state.calSelectedDate = new Date();
-      renderCalendar();
-      renderSelectedDayEvents();
-      closeEventForm();
-    });
-  }
-
-  if (el.btnCalCreateEvent) {
-    el.btnCalCreateEvent.addEventListener('click', () => {
-      openEventForm(null);
-    });
-  }
-
-  if (el.btnQuickAddToDay) {
-    el.btnQuickAddToDay.addEventListener('click', () => {
-      openEventForm(null);
-    });
-  }
-
-  if (el.btnCancelCalForm) {
-    el.btnCancelCalForm.addEventListener('click', closeEventForm);
-  }
-
-  if (el.btnCancelEventBtn) {
-    el.btnCancelEventBtn.addEventListener('click', closeEventForm);
-  }
-
-  if (el.calEventForm) {
-    el.calEventForm.addEventListener('submit', handleEventFormSubmit);
-  }
-
-  // Save state to localStorage
-  saveState();
 }
 
 // ==================== SALVAR ESTADO ====================
