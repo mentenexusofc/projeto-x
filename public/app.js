@@ -11,8 +11,10 @@ const state = {
   isGenerating: false,
   systemDirectives: localStorage.getItem('nexus_directives') || '',
   fileToMove: null, // Armazena { filename, folder, pathId }
-  agendaEvents: [], // Nova: eventos da agenda
-  selectedEvent: null
+  agendaEvents: [],
+  selectedEvent: null,
+  calCurrentDate: new Date(),
+  calSelectedDate: new Date()
 };
 
 // ==================== ELEMENTOS DOM ====================
@@ -83,12 +85,32 @@ const el = {
   customInstructions: document.getElementById('custom-system-instructions'),
   btnSaveDirectives: document.getElementById('btn-save-directives'),
   btnResetDirectives: document.getElementById('btn-reset-directives'),
-  // Agenda
+  // Agenda & Google Calendar
   btnAgenda: document.getElementById('btn-agenda'),
   modalAgenda: document.getElementById('modal-agenda'),
   btnCloseAgendaModal: document.getElementById('btn-close-agenda-modal'),
-  btnNovoEvento: document.getElementById('btn-novo-evento'),
-  agendaList: document.getElementById('agenda-list')
+  btnCalToday: document.getElementById('btn-cal-today'),
+  btnCalPrev: document.getElementById('btn-cal-prev'),
+  btnCalNext: document.getElementById('btn-cal-next'),
+  calMonthYear: document.getElementById('cal-month-year'),
+  btnCalCreateEvent: document.getElementById('btn-cal-create-event'),
+  calendarDaysGrid: document.getElementById('calendar-days-grid'),
+  calPanelDayEvents: document.getElementById('cal-panel-day-events'),
+  calSelectedDayTitle: document.getElementById('cal-selected-day-title'),
+  btnQuickAddToDay: document.getElementById('btn-quick-add-to-day'),
+  calDayEventsList: document.getElementById('cal-day-events-list'),
+  calPanelForm: document.getElementById('cal-panel-form'),
+  calFormTitle: document.getElementById('cal-form-title'),
+  btnCancelCalForm: document.getElementById('btn-cancel-cal-form'),
+  calEventForm: document.getElementById('cal-event-form'),
+  calEventId: document.getElementById('cal-event-id'),
+  calEventTitulo: document.getElementById('cal-event-titulo'),
+  calEventPasta: document.getElementById('cal-event-pasta'),
+  calEventPrioridade: document.getElementById('cal-event-prioridade'),
+  calEventInicio: document.getElementById('cal-event-inicio'),
+  calEventFim: document.getElementById('cal-event-fim'),
+  calEventDescricao: document.getElementById('cal-event-descricao'),
+  btnCancelEventBtn: document.getElementById('btn-cancel-event-btn')
 };
 
 // ==================== CONFIGURAÇÃO DO MARKED ====================
@@ -136,20 +158,16 @@ async function init() {
   // Set initial sidebar state for mobile
   const isMobile = window.innerWidth <= 900;
   if (isMobile) {
-    document.body.classList.add('sidebar-open');
-    el.sidebar.classList.add('open');
-    el.btnSidebarToggle.querySelector('i').classList.remove('fa-bars');
-    el.btnSidebarToggle.querySelector('i').classList.add('fa-xmark');
+    el.sidebar.classList.remove('open');
+    document.body.classList.remove('sidebar-open');
   }
-
-  // Carregar eventos da agenda
-  await loadAgenda();
 
   bindEvents();
   if (state.systemDirectives && el.customInstructions) {
     el.customInstructions.value = state.systemDirectives;
   }
   await checkAuth();
+  await loadAgenda();
 }
 
 // ==================== AUTENTICAÇÃO ====================
@@ -899,9 +917,12 @@ async function sendMessage() {
               const parsed = JSON.parse(jsonStr);
               if (parsed.text) {
                 fullResponse += parsed.text;
-                contentBody.innerHTML = marked.parse(fullResponse);
+                contentBody.innerHTML = formatMarkdownWithAgendaCards(fullResponse);
                 addCopyButtonsToCode(contentBody);
                 el.chatMessages.scrollTop = el.chatMessages.scrollHeight;
+              } else if (parsed.agenda_updated) {
+                await loadAgenda();
+                notifyBanner('📅 Agenda sincronizada com nova missão da IA!');
               } else if (parsed.error) {
                 throw new Error(parsed.error);
               }
@@ -940,7 +961,7 @@ function appendMessage(sender, text, isTyping = false) {
 
   let renderedContent = '';
   if (text) {
-    renderedContent = sender === 'model' && window.marked ? marked.parse(text) : escapeHtml(text);
+    renderedContent = sender === 'model' ? formatMarkdownWithAgendaCards(text) : escapeHtml(text);
   }
 
   row.innerHTML = `
@@ -1213,72 +1234,445 @@ function bindEvents() {
     }
   });
 
-  // Agenda: Abrir/Fechar modal
-  el.btnAgenda.addEventListener('click', () => {
-    loadAgenda();
-    // Populate pasta select
-    const agendaPastaSelect = document.getElementById('agenda-pasta');
-    if (agendaPastaSelect) {
-      const folderOptions = state.folders.map(f => `<option value="${f.name}">${f.name}</option>`).join('');
-      agendaPastaSelect.innerHTML = `<option value="Geral">Geral</option>${folderOptions}`;
-    }
-    el.modalAgenda.classList.remove('hidden');
-    document.body.classList.add('sidebar-open');
-    // Allow body scrolling when agenda modal is open
-    document.body.style.overflow = 'auto';
-  });
-
-  el.btnCloseAgendaModal.addEventListener('click', () => {
-    el.modalAgenda.classList.add('hidden');
-    document.body.classList.remove('sidebar-open');
-    // Restore body overflow state (could be 'hidden' or 'auto' depending on context)
-    document.body.style.overflow = '';
-  });
-
-  // Agenda: Novo evento
-  el.btnNovoEvento.addEventListener('click', () => {
-    state.selectedEvent = null;
-    el.modalAgenda.querySelector('textarea').value = '';
-    el.modalAgenda.querySelectorAll('input')[0].value = '';
-    el.modalAgenda.classList.remove('hidden');
-  });
-
-  // Agenda: Salvar evento
-  el.modalAgenda.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const titulo = el.modalAgenda.querySelector('input[placeholder*="Titulo"]').value.trim();
-    const descricao = el.modalAgenda.querySelector('textarea').value.trim();
-    const dataInicio = el.modalAgenda.querySelector('input[placeholder*="Data"]').value;
-    const dataFim = el.modalAgenda.querySelector('input[placeholder*="Fim"]').value;
-    const pasta = el.modalAgenda.querySelector('select').value;
-
-    if (!titulo) {
-      notifyBanner('Título é obrigatório!');
-      return;
-    }
-
+// Formatar markdown e converter tags de agenda da IA em cards interativos
+function formatMarkdownWithAgendaCards(text) {
+  if (!text) return '';
+  const processed = text.replace(/```agenda_action\s*([\s\S]*?)```/g, (match, jsonStr) => {
     try {
-      const res = await fetch('/api/agenda', {
+      const data = JSON.parse(jsonStr);
+      const isCreate = data.action === 'create';
+      const isDelete = data.action === 'delete';
+      const actionName = isCreate ? 'MISSÃO AGENDADA PELA IA' : (isDelete ? 'MISSÃO EXCLUÍDA PELA IA' : 'MISSÃO ATUALIZADA PELA IA');
+      const icon = isCreate ? 'fa-calendar-check' : (isDelete ? 'fa-calendar-xmark' : 'fa-calendar-pen');
+      const title = data.titulo || (isDelete ? `ID: ${data.id}` : 'Missão Operacional');
+      const timeInfo = data.dataInicio ? new Date(data.dataInicio).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '';
+      const pasta = data.pasta ? ` • Pasta: ${data.pasta}` : '';
+
+      return `
+        <div class="ia-agenda-card">
+          <div class="ia-agenda-icon"><i class="fa-solid ${icon}"></i></div>
+          <div class="ia-agenda-details">
+            <span class="ia-agenda-tag">${actionName}</span>
+            <span class="ia-agenda-title">${escapeHtml(title)}</span>
+            ${timeInfo ? `<span class="ia-agenda-meta"><i class="fa-regular fa-clock"></i> ${timeInfo}${pasta}</span>` : ''}
+          </div>
+        </div>
+      `;
+    } catch (e) {
+      return match;
+    }
+  });
+
+  return window.marked ? marked.parse(processed) : escapeHtml(processed);
+}
+
+// ==================== GESTÃO DA AGENDA & GOOGLE CALENDAR ====================
+
+async function loadAgenda() {
+  try {
+    const res = await fetch('/api/agenda', { headers: getAuthHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    state.agendaEvents = data.eventos || [];
+    renderCalendar();
+    renderSelectedDayEvents();
+  } catch (err) {
+    console.error('Erro ao carregar agenda:', err);
+  }
+}
+
+function formatDateKey(dateObj) {
+  const y = dateObj.getFullYear();
+  const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const d = String(dateObj.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function renderCalendar() {
+  if (!el.calendarDaysGrid || !el.calMonthYear) return;
+
+  const currentYear = state.calCurrentDate.getFullYear();
+  const currentMonth = state.calCurrentDate.getMonth();
+
+  const monthNames = [
+    'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+  ];
+  el.calMonthYear.textContent = `${monthNames[currentMonth]} ${currentYear}`;
+
+  const firstDayOfWeek = new Date(currentYear, currentMonth, 1).getDay(); // 0 = Domingo
+  const daysInCurrentMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+  const daysInPrevMonth = new Date(currentYear, currentMonth, 0).getDate();
+
+  const todayKey = formatDateKey(new Date());
+  const selectedKey = formatDateKey(state.calSelectedDate);
+
+  let gridHtml = '';
+
+  // 1. Dias do mês anterior
+  for (let i = firstDayOfWeek - 1; i >= 0; i--) {
+    const dayNum = daysInPrevMonth - i;
+    const prevDate = new Date(currentYear, currentMonth - 1, dayNum);
+    const dateKey = formatDateKey(prevDate);
+    const eventsOnDay = getEventsForDate(dateKey);
+    gridHtml += renderDayCell(dayNum, prevDate, dateKey, true, dateKey === todayKey, dateKey === selectedKey, eventsOnDay);
+  }
+
+  // 2. Dias do mês atual
+  for (let day = 1; day <= daysInCurrentMonth; day++) {
+    const cellDate = new Date(currentYear, currentMonth, day);
+    const dateKey = formatDateKey(cellDate);
+    const eventsOnDay = getEventsForDate(dateKey);
+    gridHtml += renderDayCell(day, cellDate, dateKey, false, dateKey === todayKey, dateKey === selectedKey, eventsOnDay);
+  }
+
+  // 3. Dias do próximo mês para completar grade múltipla de 7 (35 ou 42)
+  const totalCellsSoFar = firstDayOfWeek + daysInCurrentMonth;
+  const targetTotal = totalCellsSoFar > 35 ? 42 : 35;
+  const remaining = targetTotal - totalCellsSoFar;
+
+  for (let nextDay = 1; nextDay <= remaining; nextDay++) {
+    const nextDate = new Date(currentYear, currentMonth + 1, nextDay);
+    const dateKey = formatDateKey(nextDate);
+    const eventsOnDay = getEventsForDate(dateKey);
+    gridHtml += renderDayCell(nextDay, nextDate, dateKey, true, dateKey === todayKey, dateKey === selectedKey, eventsOnDay);
+  }
+
+  el.calendarDaysGrid.innerHTML = gridHtml;
+
+  // Bind click nos dias
+  el.calendarDaysGrid.querySelectorAll('.cal-day-cell').forEach(cell => {
+    cell.addEventListener('click', () => {
+      const dateStr = cell.getAttribute('data-date');
+      if (dateStr) {
+        const [y, m, d] = dateStr.split('-').map(Number);
+        state.calSelectedDate = new Date(y, m - 1, d);
+        if (cell.classList.contains('other-month')) {
+          state.calCurrentDate = new Date(y, m - 1, 1);
+        }
+        renderCalendar();
+        renderSelectedDayEvents();
+        closeEventForm();
+      }
+    });
+  });
+}
+
+function getEventsForDate(dateKey) {
+  return state.agendaEvents.filter(e => {
+    if (!e.dataInicio) return false;
+    return e.dataInicio.startsWith(dateKey);
+  });
+}
+
+function renderDayCell(dayNum, dateObj, dateKey, isOtherMonth, isToday, isSelected, events) {
+  let eventsHtml = '';
+  const maxPills = 3;
+  const displayEvents = events.slice(0, maxPills);
+
+  displayEvents.forEach(evt => {
+    const prioClass = `prio-${evt.prioridade || 'normal'}`;
+    const timeStr = evt.dataInicio && evt.dataInicio.length >= 16 ? evt.dataInicio.substring(11, 16) : '';
+    eventsHtml += `
+      <div class="cal-event-pill ${prioClass}" title="${escapeHtml(evt.titulo)} (${timeStr})">
+        ${timeStr ? `<strong>${timeStr}</strong> ` : ''}${escapeHtml(evt.titulo)}
+      </div>
+    `;
+  });
+
+  if (events.length > maxPills) {
+    eventsHtml += `<div class="cal-more-badge">+${events.length - maxPills} missões</div>`;
+  }
+
+  return `
+    <div class="cal-day-cell ${isOtherMonth ? 'other-month' : ''} ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}" data-date="${dateKey}">
+      <div class="cal-day-header-row">
+        <span class="cal-day-number">${dayNum}</span>
+      </div>
+      <div class="cal-day-events-container">
+        ${eventsHtml}
+      </div>
+    </div>
+  `;
+}
+
+function renderSelectedDayEvents() {
+  if (!el.calDayEventsList || !el.calSelectedDayTitle) return;
+
+  const dateKey = formatDateKey(state.calSelectedDate);
+  const weekdays = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+  const monthNames = [
+    'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+  ];
+
+  const weekday = weekdays[state.calSelectedDate.getDay()];
+  const day = state.calSelectedDate.getDate();
+  const monthName = monthNames[state.calSelectedDate.getMonth()];
+  const year = state.calSelectedDate.getFullYear();
+
+  el.calSelectedDayTitle.textContent = `${weekday}, ${day} de ${monthName} de ${year}`;
+
+  const events = getEventsForDate(dateKey);
+
+  if (events.length === 0) {
+    el.calDayEventsList.innerHTML = `
+      <div class="cal-empty-state">
+        <i class="fa-regular fa-calendar-check"></i>
+        <p>Nenhuma missão agendada neste dia.</p>
+        <button id="btn-empty-add-mission" class="btn-tool-sm btn-cal-action">
+          <i class="fa-solid fa-plus"></i> Agendar Missão
+        </button>
+      </div>
+    `;
+    const btnEmptyAdd = document.getElementById('btn-empty-add-mission');
+    if (btnEmptyAdd) {
+      btnEmptyAdd.addEventListener('click', () => openEventForm(null));
+    }
+    return;
+  }
+
+  el.calDayEventsList.innerHTML = events.map(evt => {
+    const prio = evt.prioridade || 'normal';
+    const prioLabel = prio === 'alta' ? 'Crítica' : (prio === 'media' ? 'Média' : 'Normal');
+    const startStr = evt.dataInicio && evt.dataInicio.length >= 16 ? evt.dataInicio.substring(11, 16) : '--:--';
+    const endStr = evt.dataFim && evt.dataFim.length >= 16 ? evt.dataFim.substring(11, 16) : '';
+    const timeDisplay = endStr ? `${startStr} às ${endStr}` : startStr;
+
+    return `
+      <div class="cal-day-event-card prio-${prio}" data-event-id="${evt.id}">
+        <div class="card-title-row">
+          <div class="card-event-title">${escapeHtml(evt.titulo)}</div>
+        </div>
+        <div class="card-badge-row">
+          <span class="card-time-badge"><i class="fa-regular fa-clock"></i> ${timeDisplay}</span>
+          <span class="card-folder-badge"><i class="fa-solid fa-folder"></i> ${escapeHtml(evt.pasta || 'Geral')}</span>
+          <span class="card-prio-badge ${prio}">${prioLabel}</span>
+          ${evt.criadoPor === 'IA' ? '<span class="card-folder-badge" style="color:var(--primary);"><i class="fa-solid fa-brain"></i> IA</span>' : ''}
+        </div>
+        ${evt.descricao ? `<div class="card-desc">${escapeHtml(evt.descricao)}</div>` : ''}
+        <div class="card-actions-row">
+          <button class="btn-item-action btn-edit-mission" title="Editar Missão" data-id="${evt.id}">
+            <i class="fa-regular fa-pen-to-square"></i> Editar
+          </button>
+          <button class="btn-item-action delete btn-delete-mission" title="Excluir Missão" data-id="${evt.id}">
+            <i class="fa-regular fa-trash-can"></i> Excluir
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Bind botões editar e excluir
+  el.calDayEventsList.querySelectorAll('.btn-edit-mission').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute('data-id');
+      const eventToEdit = state.agendaEvents.find(ev => ev.id === id);
+      if (eventToEdit) openEventForm(eventToEdit);
+    });
+  });
+
+  el.calDayEventsList.querySelectorAll('.btn-delete-mission').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute('data-id');
+      if (confirm('Tem certeza que deseja excluir esta missão da agenda?')) {
+        await deleteAgendaEvent(id);
+      }
+    });
+  });
+}
+
+function populateCalendarFolderSelect() {
+  if (!el.calEventPasta) return;
+  const folderOptions = state.folders.map(f => `<option value="${escapeHtml(f.name)}">${escapeHtml(f.name)}</option>`).join('');
+  el.calEventPasta.innerHTML = `<option value="Geral">Geral</option>${folderOptions}`;
+}
+
+function formatToInputDateTime(dateObj, hour = 9, minute = 0) {
+  const d = new Date(dateObj);
+  d.setHours(hour, minute, 0, 0);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const h = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${y}-${m}-${day}T${h}:${min}`;
+}
+
+function openEventForm(eventToEdit = null) {
+  populateCalendarFolderSelect();
+  el.calPanelDayEvents.classList.add('hidden');
+  el.calPanelForm.classList.remove('hidden');
+
+  if (eventToEdit) {
+    el.calFormTitle.textContent = 'Editar Missão';
+    el.calEventId.value = eventToEdit.id;
+    el.calEventTitulo.value = eventToEdit.titulo || '';
+    el.calEventDescricao.value = eventToEdit.descricao || '';
+    el.calEventPasta.value = eventToEdit.pasta || 'Geral';
+    el.calEventPrioridade.value = eventToEdit.prioridade || 'normal';
+    el.calEventInicio.value = eventToEdit.dataInicio ? eventToEdit.dataInicio.substring(0, 16) : '';
+    el.calEventFim.value = eventToEdit.dataFim ? eventToEdit.dataFim.substring(0, 16) : '';
+  } else {
+    el.calFormTitle.textContent = 'Nova Missão Operacional';
+    el.calEventId.value = '';
+    el.calEventTitulo.value = '';
+    el.calEventDescricao.value = '';
+    el.calEventPasta.value = 'Geral';
+    el.calEventPrioridade.value = 'normal';
+    
+    const now = new Date();
+    const currentHour = now.getHours();
+    const targetHour = (state.calSelectedDate.toDateString() === now.toDateString()) ? (currentHour + 1) : 9;
+    
+    el.calEventInicio.value = formatToInputDateTime(state.calSelectedDate, targetHour, 0);
+    el.calEventFim.value = formatToInputDateTime(state.calSelectedDate, targetHour + 1, 0);
+  }
+
+  el.calEventTitulo.focus();
+}
+
+function closeEventForm() {
+  if (!el.calPanelForm || !el.calPanelDayEvents) return;
+  el.calPanelForm.classList.add('hidden');
+  el.calPanelDayEvents.classList.remove('hidden');
+}
+
+async function handleEventFormSubmit(e) {
+  e.preventDefault();
+  const id = el.calEventId.value;
+  const titulo = el.calEventTitulo.value.trim();
+  const pasta = el.calEventPasta.value;
+  const prioridade = el.calEventPrioridade.value;
+  const dataInicio = el.calEventInicio.value;
+  const dataFim = el.calEventFim.value;
+  const descricao = el.calEventDescricao.value.trim();
+
+  if (!titulo) {
+    notifyBanner('Título da missão é obrigatório!');
+    return;
+  }
+  if (!dataInicio) {
+    notifyBanner('Data e horário de início são obrigatórios!');
+    return;
+  }
+
+  const payload = { titulo, descricao, pasta, prioridade, dataInicio, dataFim };
+
+  try {
+    let res;
+    if (id) {
+      res = await fetch(`/api/agenda/${id}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(payload)
+      });
+    } else {
+      res = await fetch('/api/agenda', {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ titulo, descricao, dataInicio, dataFim, pasta })
+        body: JSON.stringify(payload)
       });
-
-      if (res.ok) {
-        await loadAgenda();
-        el.modalAgenda.classList.add('hidden');
-        document.body.classList.remove('sidebar-open');
-        document.body.style.overflow = '';
-        notifyBanner('Evento criado com sucesso!');
-      } else {
-        const err = await res.json();
-        alert(err.error || 'Erro ao criar evento.');
-      }
-    } catch (err) {
-      console.error('Erro ao criar evento:', err);
-      alert('Erro de conexão com o servidor.');
     }
-  });
+
+    if (res.ok) {
+      await loadAgenda();
+      closeEventForm();
+      notifyBanner(id ? 'Missão atualizada na agenda!' : 'Missão criada na agenda com sucesso!');
+    } else {
+      const err = await res.json();
+      alert(err.error || 'Erro ao salvar evento na agenda.');
+    }
+  } catch (err) {
+    console.error('Erro ao salvar evento:', err);
+    alert('Erro de conexão ao salvar missão.');
+  }
+}
+
+async function deleteAgendaEvent(id) {
+  try {
+    const res = await fetch(`/api/agenda/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+
+    if (res.ok) {
+      await loadAgenda();
+      notifyBanner('Missão excluída da agenda.');
+    } else {
+      const err = await res.json();
+      alert(err.error || 'Erro ao excluir missão.');
+    }
+  } catch (err) {
+    console.error('Erro ao excluir evento:', err);
+    alert('Erro de conexão ao excluir missão.');
+  }
+}
+
+  // ==================== EVENTOS DA AGENDA & GOOGLE CALENDAR ====================
+  if (el.btnAgenda) {
+    el.btnAgenda.addEventListener('click', () => {
+      loadAgenda();
+      closeEventForm();
+      el.modalAgenda.classList.remove('hidden');
+    });
+  }
+
+  if (el.btnCloseAgendaModal) {
+    el.btnCloseAgendaModal.addEventListener('click', () => {
+      el.modalAgenda.classList.add('hidden');
+    });
+  }
+
+  if (el.btnCalPrev) {
+    el.btnCalPrev.addEventListener('click', () => {
+      state.calCurrentDate.setMonth(state.calCurrentDate.getMonth() - 1);
+      renderCalendar();
+    });
+  }
+
+  if (el.btnCalNext) {
+    el.btnCalNext.addEventListener('click', () => {
+      state.calCurrentDate.setMonth(state.calCurrentDate.getMonth() + 1);
+      renderCalendar();
+    });
+  }
+
+  if (el.btnCalToday) {
+    el.btnCalToday.addEventListener('click', () => {
+      state.calCurrentDate = new Date();
+      state.calSelectedDate = new Date();
+      renderCalendar();
+      renderSelectedDayEvents();
+      closeEventForm();
+    });
+  }
+
+  if (el.btnCalCreateEvent) {
+    el.btnCalCreateEvent.addEventListener('click', () => {
+      openEventForm(null);
+    });
+  }
+
+  if (el.btnQuickAddToDay) {
+    el.btnQuickAddToDay.addEventListener('click', () => {
+      openEventForm(null);
+    });
+  }
+
+  if (el.btnCancelCalForm) {
+    el.btnCancelCalForm.addEventListener('click', closeEventForm);
+  }
+
+  if (el.btnCancelEventBtn) {
+    el.btnCancelEventBtn.addEventListener('click', closeEventForm);
+  }
+
+  if (el.calEventForm) {
+    el.calEventForm.addEventListener('submit', handleEventFormSubmit);
+  }
 
   // Save state to localStorage
   saveState();

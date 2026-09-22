@@ -323,52 +323,127 @@
     </div>
   </div>
 
-  <!-- ==================== MODAL: AGENDA ================== -->
+  <!-- ==================== MODAL: GOOGLE CALENDAR / AGENDA ================== -->
   <div id="modal-agenda" class="modal-overlay hidden">
-    <div class="modal-card modal-card-lg">
+    <div class="modal-card modal-card-calendar">
       <div class="modal-header">
         <div class="modal-title">
-          <i class="fa-solid fa-calendar"></i>
-          <h3>Minhas Missões & Eventos</h3>
+          <i class="fa-solid fa-calendar-days"></i>
+          <h3>Agenda & Missões Operacionais</h3>
+          <span class="badge-status online badge-ai-sync" style="margin-left: 10px;">
+            <i class="fa-solid fa-brain"></i> Sincronizada com IA
+          </span>
         </div>
-        <button id="btn-close-agenda-modal" class="btn-icon">
-          <i class="fa-solid fa-xmark"></i>
-        </button>
-      </div>
-      <div class="modal-body">
-        <form id="agenda-form">
-          <div class="input-group">
-            <label for="agenda-titulo">Título</label>
-            <input type="text" id="agenda-titulo" placeholder="Título do evento" maxlength="80">
+        <div class="calendar-header-actions">
+          <button id="btn-cal-today" class="btn-tool-sm" title="Ir para o dia de hoje">Hoje</button>
+          <div class="cal-nav-buttons">
+            <button id="btn-cal-prev" class="btn-icon" title="Mês anterior"><i class="fa-solid fa-chevron-left"></i></button>
+            <span id="cal-month-year" class="cal-current-label">Setembro 2026</span>
+            <button id="btn-cal-next" class="btn-icon" title="Próximo mês"><i class="fa-solid fa-chevron-right"></i></button>
           </div>
-          <div class="input-group">
-            <label for="agenda-descricao">Descrição</label>
-            <textarea id="agenda-descricao" rows="3" placeholder="Descrição opcional do evento"></textarea>
-          </div>
-          <div class="input-group">
-            <label for="agenda-data-inicio">Data Início</label>
-            <input type="datetime-local" id="agenda-data-inicio">
-          </div>
-          <div class="input-group">
-            <label for="agenda-data-fim">Data Fim</label>
-            <input type="datetime-local" id="agenda-data-fim">
-          </div>
-          <div class="input-group">
-            <label for="agenda-pasta">Pasta</label>
-            <select id="agenda-pasta">
-              <option value="Geral">Geral</option>
-              <!-- Pastas serão populadas pelo JavaScript -->
-            </select>
-          </div>
-        </form>
-        <div class="agenda-toolbar">
-          <span>PROXIMOS EVENTOS</span>
-          <button id="btn-novo-evento" class="btn-tool-sm" title="Criar Novo Evento">
-            <i class="fa-solid fa-plus"></i> Novo
+          <button id="btn-cal-create-event" class="btn-tool-sm btn-cal-action" title="Criar nova missão">
+            <i class="fa-solid fa-plus"></i> Nova Missão
+          </button>
+          <button id="btn-close-agenda-modal" class="btn-icon" title="Fechar Agenda">
+            <i class="fa-solid fa-xmark"></i>
           </button>
         </div>
-        <div id="agenda-list" class="agenda-list">
-          <!-- Eventos renderizados aqui -->
+      </div>
+
+      <div class="calendar-layout-body">
+        <!-- COLUNA ESQUERDA: GRID DO CALENDÁRIO ESTILO GOOGLE AGENDA -->
+        <div class="calendar-grid-column">
+          <div class="calendar-weekdays-header">
+            <div>DOM</div>
+            <div>SEG</div>
+            <div>TER</div>
+            <div>QUA</div>
+            <div>QUI</div>
+            <div>SEX</div>
+            <div>SÁB</div>
+          </div>
+          <div id="calendar-days-grid" class="calendar-days-grid">
+            <!-- 35 a 42 dias renderizados dinamicamente -->
+          </div>
+        </div>
+
+        <!-- COLUNA DIREITA: INSPEÇÃO DO DIA SELECIONADO & FORMULÁRIO -->
+        <div class="calendar-details-column">
+          
+          <!-- PAINEL 1: MISSÕES DO DIA SELECIONADO -->
+          <div id="cal-panel-day-events" class="cal-side-panel">
+            <div class="side-panel-header">
+              <div>
+                <span class="panel-subtitle">MISSÕES DO DIA</span>
+                <h4 id="cal-selected-day-title">23 de Setembro</h4>
+              </div>
+              <button id="btn-quick-add-to-day" class="btn-tool-sm" title="Agendar para este dia">
+                <i class="fa-solid fa-plus"></i> Agendar
+              </button>
+            </div>
+
+            <div id="cal-day-events-list" class="cal-day-events-list">
+              <!-- Missões renderizadas aqui -->
+            </div>
+          </div>
+
+          <!-- PAINEL 2: FORMULÁRIO DE CRIAR / EDITAR EVENTO -->
+          <div id="cal-panel-form" class="cal-side-panel hidden">
+            <div class="side-panel-header">
+              <h4 id="cal-form-title">Nova Missão</h4>
+              <button id="btn-cancel-cal-form" class="btn-icon" title="Fechar Formulário">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+
+            <form id="cal-event-form" class="cal-form-styled">
+              <input type="hidden" id="cal-event-id">
+              
+              <div class="input-group">
+                <label for="cal-event-titulo">Título da Missão *</label>
+                <input type="text" id="cal-event-titulo" placeholder="Ex: Reunião Estratégica" maxlength="80" required>
+              </div>
+
+              <div class="form-row-2">
+                <div class="input-group">
+                  <label for="cal-event-pasta">Pasta Vinculada</label>
+                  <select id="cal-event-pasta">
+                    <option value="Geral">Geral</option>
+                  </select>
+                </div>
+                <div class="input-group">
+                  <label for="cal-event-prioridade">Prioridade</label>
+                  <select id="cal-event-prioridade">
+                    <option value="normal">Normal (Verde)</option>
+                    <option value="media">Média (Ciano)</option>
+                    <option value="alta">Crítica (Vermelho)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-row-2">
+                <div class="input-group">
+                  <label for="cal-event-inicio">Data & Início *</label>
+                  <input type="datetime-local" id="cal-event-inicio" required>
+                </div>
+                <div class="input-group">
+                  <label for="cal-event-fim">Data & Término</label>
+                  <input type="datetime-local" id="cal-event-fim">
+                </div>
+              </div>
+
+              <div class="input-group">
+                <label for="cal-event-descricao">Diretrizes / Detalhes</label>
+                <textarea id="cal-event-descricao" rows="3" placeholder="Instruções, pautas ou notas operacionais..."></textarea>
+              </div>
+
+              <div class="cal-form-actions">
+                <button type="button" id="btn-cancel-event-btn" class="btn-ghost">Cancelar</button>
+                <button type="submit" id="btn-save-event-btn" class="btn-primary">Salvar na Agenda</button>
+              </div>
+            </form>
+          </div>
+
         </div>
       </div>
     </div>

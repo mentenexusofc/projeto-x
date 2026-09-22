@@ -554,9 +554,58 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
       { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
     ];
 
+    const now = new Date();
+    const nowBrasilia = now.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    const currentAgenda = loadAgenda();
+    const agendaListStr = (currentAgenda.eventos && currentAgenda.eventos.length > 0)
+      ? currentAgenda.eventos.map(e => `- [ID: ${e.id}] "${e.titulo}" | Início: ${e.dataInicio} | Fim: ${e.dataFim} | Pasta: ${e.pasta || 'Geral'} | Prioridade: ${e.prioridade || 'normal'} | Descrição: ${e.descricao || 'Sem descrição'}`).join('\n')
+      : 'Nenhuma missão agendada na agenda no momento.';
+
     const baseSystemPrompt = `Você é a inteligência artificial tática e analítica do PROJETO X, um ambiente confidencial e operacional de alta resolução.
 Seu objetivo é dar suporte irrestrito, pragmático e aprofundado ao operador em todas as suas missões estratégicas.
 Responda de forma ágil, detalhada, sem recusas vazias e com precisão analítica.
+
+[DATA E HORA ATUAL DO SISTEMA (Horário de Brasília)]:
+${nowBrasilia} (ISO: ${now.toISOString()})
+
+[AGENDA DE MISSÕES & EVENTOS CADASTRADOS]:
+${agendaListStr}
+
+[GERENCIAMENTO AUTOMÁTICO DA AGENDA PELA IA]:
+Você tem autorização operacional total para criar, reagendar, atualizar ou excluir eventos/missões na agenda do operador.
+Quando o operador pedir para agendar, marcar, criar, adiar, remarcar ou excluir eventos/reuniões/missões/prazos, você DEVE confirmar a ação de forma clara e profissional E emitir um bloco operacional no formato:
+\`\`\`agenda_action
+{
+  "action": "create",
+  "titulo": "Título da Missão",
+  "descricao": "Detalhes táticos sobre o compromisso",
+  "dataInicio": "2026-09-23T14:00:00",
+  "dataFim": "2026-09-23T15:00:00",
+  "pasta": "Geral",
+  "prioridade": "normal"
+}
+\`\`\`
+Para excluir um evento:
+\`\`\`agenda_action
+{
+  "action": "delete",
+  "id": "evt-..."
+}
+\`\`\`
+Para editar ou reagendar um evento existente:
+\`\`\`agenda_action
+{
+  "action": "update",
+  "id": "evt-...",
+  "titulo": "Novo título se alterado",
+  "dataInicio": "2026-09-23T16:00:00",
+  "dataFim": "2026-09-23T17:00:00",
+  "pasta": "Geral",
+  "prioridade": "alta"
+}
+\`\`\`
+(Prioridades aceitas: "normal", "media", "alta". Formato de data e hora: AAAA-MM-DDTHH:MM:SS no fuso horário do Brasil).
+Sempre que criar ou alterar, use horários coerentes com a solicitação do operador e confirme no texto a data e o horário acordados.
 
 ${customInstructions ? `[DIRETRIZES ESPECÍFICAS DESTA MISSÃO]:\n${customInstructions}\n` : ''}
 ${filesContext}
@@ -595,6 +644,66 @@ Sempre que o operador questionar sobre dados, relatórios ou informações dos d
       const chunkText = chunk.text();
       fullResponse += chunkText;
       res.write(`data: ${JSON.stringify({ text: chunkText })}\n\n`);
+    }
+
+    // Processar ações de agenda emitidas pela IA
+    const actionRegex = /```agenda_action\s*([\s\S]*?)```/g;
+    let match;
+    let agendaChanged = false;
+    const executedActions = [];
+
+    while ((match = actionRegex.exec(fullResponse)) !== null) {
+      try {
+        const actionData = JSON.parse(match[1]);
+        const currentAgendaData = loadAgenda();
+
+        if (actionData.action === 'create') {
+          const novoEvento = {
+            id: 'evt-' + crypto.randomUUID(),
+            titulo: (actionData.titulo || 'Nova Missão').slice(0, 80),
+            descricao: actionData.descricao || '',
+            dataInicio: actionData.dataInicio || new Date().toISOString(),
+            dataFim: actionData.dataFim || new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+            pasta: actionData.pasta || 'Geral',
+            prioridade: actionData.prioridade || 'normal',
+            arquivosRelacionados: [],
+            criadoPor: 'IA',
+            criadoEm: new Date().toISOString()
+          };
+          currentAgendaData.eventos.unshift(novoEvento);
+          saveAgenda(currentAgendaData);
+          agendaChanged = true;
+          executedActions.push({ action: 'create', evento: novoEvento });
+        } else if (actionData.action === 'delete' && actionData.id) {
+          const initialLen = currentAgendaData.eventos.length;
+          currentAgendaData.eventos = currentAgendaData.eventos.filter(e => e.id !== actionData.id);
+          if (currentAgendaData.eventos.length < initialLen) {
+            saveAgenda(currentAgendaData);
+            agendaChanged = true;
+            executedActions.push({ action: 'delete', id: actionData.id });
+          }
+        } else if (actionData.action === 'update' && actionData.id) {
+          const idx = currentAgendaData.eventos.findIndex(e => e.id === actionData.id);
+          if (idx !== -1) {
+            if (actionData.titulo) currentAgendaData.eventos[idx].titulo = actionData.titulo.slice(0, 80);
+            if (actionData.descricao !== undefined) currentAgendaData.eventos[idx].descricao = actionData.descricao;
+            if (actionData.dataInicio) currentAgendaData.eventos[idx].dataInicio = actionData.dataInicio;
+            if (actionData.dataFim) currentAgendaData.eventos[idx].dataFim = actionData.dataFim;
+            if (actionData.pasta) currentAgendaData.eventos[idx].pasta = actionData.pasta;
+            if (actionData.prioridade) currentAgendaData.eventos[idx].prioridade = actionData.prioridade;
+            currentAgendaData.eventos[idx].atualizadoEm = new Date().toISOString();
+            saveAgenda(currentAgendaData);
+            agendaChanged = true;
+            executedActions.push({ action: 'update', evento: currentAgendaData.eventos[idx] });
+          }
+        }
+      } catch (parseErr) {
+        console.warn('Erro ao processar agenda_action:', parseErr.message);
+      }
+    }
+
+    if (agendaChanged) {
+      res.write(`data: ${JSON.stringify({ agenda_updated: true, actions: executedActions })}\n\n`);
     }
 
     // Se tiver chatId, salvar as mensagens no backend
@@ -652,7 +761,7 @@ app.get('/api/agenda', authenticateToken, (req, res) => {
 
 // Criar novo evento
 app.post('/api/agenda', authenticateToken, (req, res) => {
-  const { titulo, descricao, dataInicio, dataFim, pasta } = req.body;
+  const { titulo, descricao, dataInicio, dataFim, pasta, prioridade } = req.body;
   if (!titulo) return res.status(400).json({ error: 'Título obrigatório.' });
 
   const agenda = loadAgenda();
@@ -663,6 +772,7 @@ app.post('/api/agenda', authenticateToken, (req, res) => {
     dataInicio: dataInicio || new Date().toISOString(),
     dataFim: dataFim || new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
     pasta: pasta || 'Geral',
+    prioridade: prioridade || 'normal',
     arquivosRelacionados: [],
     criadoEm: new Date().toISOString()
   };
@@ -676,7 +786,7 @@ app.post('/api/agenda', authenticateToken, (req, res) => {
 // Atualizar evento
 app.put('/api/agenda/:id', authenticateToken, (req, res) => {
   const { id } = req.params;
-  const { titulo, descricao, dataInicio, dataFim, pasta } = req.body;
+  const { titulo, descricao, dataInicio, dataFim, pasta, prioridade } = req.body;
 
   let agenda = loadAgenda();
   const index = agenda.eventos.findIndex(e => e.id === id);
@@ -688,6 +798,7 @@ app.put('/api/agenda/:id', authenticateToken, (req, res) => {
   if (dataInicio !== undefined) agenda.eventos[index].dataInicio = dataInicio;
   if (dataFim !== undefined) agenda.eventos[index].dataFim = dataFim;
   if (pasta !== undefined) agenda.eventos[index].pasta = pasta;
+  if (prioridade !== undefined) agenda.eventos[index].prioridade = prioridade;
 
   agenda.eventos[index].atualizadoEm = new Date().toISOString();
   saveAgenda(agenda);
@@ -711,7 +822,10 @@ app.delete('/api/agenda/:id', authenticateToken, (req, res) => {
   res.json({ success: true, message: 'Evento excluído.' });
 });
 
-// ------------------- ROTA DE CHAT COM GEMINI -------------------
+// SPA fallback
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`=========================================`);
