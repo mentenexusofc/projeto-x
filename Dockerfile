@@ -9,8 +9,9 @@ RUN npm install --omit=dev
 # Copiar código-fonte
 COPY . .
 
-# Criar pasta de uploads e permissões
-RUN mkdir -p uploads
+# Criar pastas persistentes e permissões
+RUN mkdir -p uploads data uploads/Geral && \
+    chown -R node:node uploads data
 
 # Expor porta
 EXPOSE 3000
