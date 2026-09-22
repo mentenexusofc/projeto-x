@@ -1224,11 +1224,15 @@ function bindEvents() {
     }
     el.modalAgenda.classList.remove('hidden');
     document.body.classList.add('sidebar-open');
+    // Allow body scrolling when agenda modal is open
+    document.body.style.overflow = 'auto';
   });
 
   el.btnCloseAgendaModal.addEventListener('click', () => {
     el.modalAgenda.classList.add('hidden');
     document.body.classList.remove('sidebar-open');
+    // Restore body overflow state (could be 'hidden' or 'auto' depending on context)
+    document.body.style.overflow = '';
   });
 
   // Agenda: Novo evento
@@ -1264,6 +1268,7 @@ function bindEvents() {
         await loadAgenda();
         el.modalAgenda.classList.add('hidden');
         document.body.classList.remove('sidebar-open');
+        document.body.style.overflow = '';
         notifyBanner('Evento criado com sucesso!');
       } else {
         const err = await res.json();
