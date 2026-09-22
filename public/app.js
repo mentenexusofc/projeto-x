@@ -10,7 +10,9 @@ const state = {
   chatHistory: [],
   isGenerating: false,
   systemDirectives: localStorage.getItem('nexus_directives') || '',
-  fileToMove: null // Armazena { filename, folder, pathId }
+  fileToMove: null, // Armazena { filename, folder, pathId }
+  agendaEvents: [], // Nova: eventos da agenda
+  selectedEvent: null
 };
 
 // ==================== ELEMENTOS DOM ====================
@@ -28,6 +30,8 @@ const el = {
   modelSelect: document.getElementById('model-select'),
   btnLogout: document.getElementById('btn-logout'),
   btnMissionDirectives: document.getElementById('btn-mission-directives'),
+  btnSidebarToggle: document.getElementById('btn-sidebar-toggle'),
+  sidebar: document.getElementById('sidebar'),
 
   // Sidebar: Tabs & New Chat
   btnNewChat: document.getElementById('btn-new-chat'),
@@ -78,7 +82,13 @@ const el = {
   btnCloseModal: document.getElementById('btn-close-modal'),
   customInstructions: document.getElementById('custom-system-instructions'),
   btnSaveDirectives: document.getElementById('btn-save-directives'),
-  btnResetDirectives: document.getElementById('btn-reset-directives')
+  btnResetDirectives: document.getElementById('btn-reset-directives'),
+  // Agenda
+  btnAgenda: document.getElementById('btn-agenda'),
+  modalAgenda: document.getElementById('modal-agenda'),
+  btnCloseAgendaModal: document.getElementById('btn-close-agenda-modal'),
+  btnNovoEvento: document.getElementById('btn-novo-evento'),
+  agendaList: document.getElementById('agenda-list')
 };
 
 // ==================== CONFIGURAÇÃO DO MARKED ====================
@@ -99,6 +109,42 @@ if (window.marked) {
 
 // ==================== INICIALIZAÇÃO ====================
 async function init() {
+  // Restore state from localStorage
+  const savedActiveFiles = localStorage.getItem('nexus_activeFiles');
+  if (savedActiveFiles) state.activeFiles = new Set(JSON.parse(savedActiveFiles));
+
+  const savedCurrentChat = localStorage.getItem('nexus_currentChatId');
+  if (savedCurrentChat) state.currentChatId = savedCurrentChat;
+
+  const savedFolderState = localStorage.getItem('nexus_folderTreeState');
+  if (savedFolderState) {
+    // Reapply folder tree state
+    const folderState = JSON.parse(savedFolderState);
+    document.querySelectorAll('.folder-block').forEach((block, i) => {
+      if (folderState[i]) {
+        block.classList.add('open');
+      }
+    });
+  }
+
+  const savedModel = localStorage.getItem('nexus_selectedModel');
+  if (savedModel) el.modelSelect.value = savedModel;
+
+  const savedUploadFolder = localStorage.getItem('nexus_uploadFolder');
+  if (savedUploadFolder) el.selectTargetFolder.value = savedUploadFolder;
+
+  // Set initial sidebar state for mobile
+  const isMobile = window.innerWidth <= 900;
+  if (isMobile) {
+    document.body.classList.add('sidebar-open');
+    el.sidebar.classList.add('open');
+    el.btnSidebarToggle.querySelector('i').classList.remove('fa-bars');
+    el.btnSidebarToggle.querySelector('i').classList.add('fa-xmark');
+  }
+
+  // Carregar eventos da agenda
+  await loadAgenda();
+
   bindEvents();
   if (state.systemDirectives && el.customInstructions) {
     el.customInstructions.value = state.systemDirectives;
@@ -259,6 +305,7 @@ async function createNewChat() {
 async function switchChat(chatId) {
   try {
     state.currentChatId = chatId;
+    saveState();
     renderChatsList(); // Atualiza destaque ativo
 
     const res = await fetch(`/api/chats/${chatId}`, { headers: getAuthHeaders() });
@@ -383,6 +430,13 @@ async function loadFolders() {
     // Preenche seletores de pasta
     updateFolderDropdowns();
 
+    // Also populate agenda pasta select
+    const agendaPastaSelect = document.getElementById('agenda-pasta');
+    if (agendaPastaSelect) {
+      const folderOptions = state.folders.map(f => `<option value="${f.name}">${f.name}</option>`).join('');
+      agendaPastaSelect.innerHTML = `<option value="Geral">Geral</option>${folderOptions}`;
+    }
+
     // Se houver novos arquivos, adiciona ao activeFiles se desejar
     state.folders.forEach(folder => {
       folder.files.forEach(f => {
@@ -398,6 +452,80 @@ async function loadFolders() {
   } catch (err) {
     console.error('Erro ao carregar pastas:', err);
   }
+}
+
+async function loadAgenda() {
+  try {
+    const res = await fetch('/api/agenda', { headers: getAuthHeaders() });
+    if (!res.ok) return;
+
+    const data = await res.json();
+    state.agendaEvents = data.eventos || [];
+    renderAgendaList();
+  } catch (err) {
+    console.error('Erro ao carregar agenda:', err);
+  }
+}
+
+function renderAgendaList() {
+  if (state.agendaEvents.length === 0) {
+    el.agendaList.innerHTML = `<div class="agenda-list.empty">Nenhum evento encontrado.</div>`;
+    return;
+  }
+
+  el.agendaList.innerHTML = state.agendaEvents.map((event, index) => {
+    const dataInicio = event.dataInicio ? new Date(event.dataInicio) : new Date();
+    const dataFim = event.dataFim ? new Date(event.dataFim) : new Date();
+    const hoje = new Date();
+    const isHoje = dataInicio.toDateString() === hoje.toDateString();
+    const isFuturo = dataInicio > hoje;
+    const isPassado = dataInicio < hoje;
+
+    let statusClass = '';
+    let statusText = '';
+
+    if (isPassado) {
+      statusClass = 'evento-passado';
+      statusText = 'Passado';
+    } else if (isHoje) {
+      statusClass = 'evento-hoje';
+      statusText = 'Hoje';
+    } else if (isFuturo) {
+      statusClass = 'evento-futuro';
+      statusText = 'Futuro';
+    }
+
+    return `
+      <div class="agenda-event" data-event-id="${event.id}">
+        <div class="event-data">
+          <div class="event-titulo" title="${event.titulo}">${event.titulo}</div>
+          <div class="event-meta">
+            ${event.pasta ? `<i class="fa-solid fa-folder"></i> ${event.pasta}` : ''}
+            ${event.dataInicio ? `<i class="fa-solid fa-clock"></i> ${dataInicio.toLocaleDateString('pt-BR')} ${dataInicio.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : ''}
+          </div>
+        </div>
+        <div class="event-acoes">
+          <button class="btn-acoes ver" title="Ver detalhes">Ver</button>
+          <button class="btn-acoes editar" title="Editar">Editar</button>
+          <button class="btn-acoes excluir" title="Excluir">Excluir</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Adicionar evento de clique nos eventos
+  el.agendaList.querySelectorAll('.agenda-event').forEach(eventEl => {
+    eventEl.addEventListener('click', (e) => {
+      if (e.target.closest('.btn-acoes')) return;
+
+      const eventId = eventEl.getAttribute('data-event-id');
+      const event = state.agendaEvents.find(e => e.id === eventId);
+      if (event) {
+        state.selectedEvent = event;
+        openEventDetails(event);
+      }
+    });
+  });
 }
 
 function updateFolderDropdowns() {
@@ -472,6 +600,7 @@ function renderFoldersTree() {
     header.addEventListener('click', (e) => {
       if (e.target.closest('.folder-select-all') || e.target.closest('.folder-delete-btn')) return;
       fBlock.classList.toggle('open');
+      saveState();
     });
 
     // Checkbox de selecionar todos da pasta
@@ -486,6 +615,7 @@ function renderFoldersTree() {
       }
       renderFoldersTree();
       updateContextSummary();
+      saveState();
     });
 
     // Excluir pasta
@@ -513,6 +643,7 @@ function renderFoldersTree() {
           fileEl.classList.remove('active');
         }
         updateContextSummary();
+        saveState();
       });
 
       moveBtn.addEventListener('click', (e) => {
@@ -919,6 +1050,24 @@ function bindEvents() {
     }
   });
 
+  // Toggle Sidebar Móvel
+  el.btnSidebarToggle.addEventListener('click', () => {
+    document.body.classList.toggle('sidebar-open');
+    el.sidebar.classList.toggle('open');
+    if (el.btnSidebarToggle.querySelector('i').classList.contains('fa-bars')) {
+      el.btnSidebarToggle.querySelector('i').classList.remove('fa-bars');
+      el.btnSidebarToggle.querySelector('i').classList.add('fa-xmark');
+    } else {
+      el.btnSidebarToggle.querySelector('i').classList.remove('fa-xmark');
+      el.btnSidebarToggle.querySelector('i').classList.add('fa-bars');
+    }
+  });
+
+  // Salvar modelo selecionado
+  el.modelSelect.addEventListener('change', saveState);
+  // Salvar pasta de upload selecionada
+  el.selectTargetFolder.addEventListener('change', saveState);
+
   // Logout
   el.btnLogout.addEventListener('click', async () => {
     try {
@@ -1063,6 +1212,79 @@ function bindEvents() {
       }
     }
   });
+
+  // Agenda: Abrir/Fechar modal
+  el.btnAgenda.addEventListener('click', () => {
+    loadAgenda();
+    // Populate pasta select
+    const agendaPastaSelect = document.getElementById('agenda-pasta');
+    if (agendaPastaSelect) {
+      const folderOptions = state.folders.map(f => `<option value="${f.name}">${f.name}</option>`).join('');
+      agendaPastaSelect.innerHTML = `<option value="Geral">Geral</option>${folderOptions}`;
+    }
+    el.modalAgenda.classList.remove('hidden');
+    document.body.classList.add('sidebar-open');
+  });
+
+  el.btnCloseAgendaModal.addEventListener('click', () => {
+    el.modalAgenda.classList.add('hidden');
+    document.body.classList.remove('sidebar-open');
+  });
+
+  // Agenda: Novo evento
+  el.btnNovoEvento.addEventListener('click', () => {
+    state.selectedEvent = null;
+    el.modalAgenda.querySelector('textarea').value = '';
+    el.modalAgenda.querySelectorAll('input')[0].value = '';
+    el.modalAgenda.classList.remove('hidden');
+  });
+
+  // Agenda: Salvar evento
+  el.modalAgenda.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const titulo = el.modalAgenda.querySelector('input[placeholder*="Titulo"]').value.trim();
+    const descricao = el.modalAgenda.querySelector('textarea').value.trim();
+    const dataInicio = el.modalAgenda.querySelector('input[placeholder*="Data"]').value;
+    const dataFim = el.modalAgenda.querySelector('input[placeholder*="Fim"]').value;
+    const pasta = el.modalAgenda.querySelector('select').value;
+
+    if (!titulo) {
+      notifyBanner('Título é obrigatório!');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/agenda', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ titulo, descricao, dataInicio, dataFim, pasta })
+      });
+
+      if (res.ok) {
+        await loadAgenda();
+        el.modalAgenda.classList.add('hidden');
+        document.body.classList.remove('sidebar-open');
+        notifyBanner('Evento criado com sucesso!');
+      } else {
+        const err = await res.json();
+        alert(err.error || 'Erro ao criar evento.');
+      }
+    } catch (err) {
+      console.error('Erro ao criar evento:', err);
+      alert('Erro de conexão com o servidor.');
+    }
+  });
+
+  // Save state to localStorage
+  saveState();
+}
+
+// ==================== SALVAR ESTADO ====================
+function saveState() {
+  localStorage.setItem('nexus_activeFiles', JSON.stringify(Array.from(state.activeFiles)));
+  localStorage.setItem('nexus_currentChatId', state.currentChatId);
+  localStorage.setItem('nexus_selectedModel', el.modelSelect.value);
+  localStorage.setItem('nexus_uploadFolder', el.selectTargetFolder.value);
 }
 
 // Inicializa no carregamento do DOM

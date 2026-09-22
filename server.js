@@ -26,6 +26,7 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'projetoX2026';
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 const DATA_DIR = path.join(__dirname, 'data');
 const CHATS_FILE = path.join(DATA_DIR, 'chats.json');
+const AGENDA_FILE = path.join(DATA_DIR, 'agenda.json');
 
 // Inicializar pastas necessárias
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -34,6 +35,9 @@ if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 // Garantir pasta padrão "Geral"
 const DEFAULT_FOLDER = path.join(UPLOADS_DIR, 'Geral');
 if (!fs.existsSync(DEFAULT_FOLDER)) fs.mkdirSync(DEFAULT_FOLDER, { recursive: true });
+
+// Inicializar agenda
+if (!fs.existsSync(AGENDA_FILE)) fs.writeFileSync(AGENDA_FILE, '{"eventos":[]}', 'utf-8');
 
 // Helper para ler/salvar chats
 function loadChats() {
@@ -53,6 +57,27 @@ function saveChats(chats) {
     fs.writeFileSync(CHATS_FILE, JSON.stringify(chats, null, 2), 'utf-8');
   } catch (e) {
     console.error('Erro ao salvar chats:', e.message);
+  }
+}
+
+function loadAgenda() {
+  try {
+    if (fs.existsSync(AGENDA_FILE)) {
+      const data = fs.readFileSync(AGENDA_FILE, 'utf-8');
+      return JSON.parse(data) || { eventos: [] };
+    }
+    return { eventos: [] };
+  } catch (e) {
+    console.error('Erro ao ler agenda:', e.message);
+  }
+  return { eventos: [] };
+}
+
+function saveAgenda(agenda) {
+  try {
+    fs.writeFileSync(AGENDA_FILE, JSON.stringify(agenda, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('Erro ao salvar agenda:', e.message);
   }
 }
 
@@ -617,10 +642,76 @@ Sempre que o operador questionar sobre dados, relatórios ou informações dos d
   }
 });
 
-// SPA fallback
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+// ------------------- ROTAS DA AGENDA -------------------
+
+// Listar todos os eventos da agenda
+app.get('/api/agenda', authenticateToken, (req, res) => {
+  const agenda = loadAgenda();
+  res.json({ eventos: agenda.eventos });
 });
+
+// Criar novo evento
+app.post('/api/agenda', authenticateToken, (req, res) => {
+  const { titulo, descricao, dataInicio, dataFim, pasta } = req.body;
+  if (!titulo) return res.status(400).json({ error: 'Título obrigatório.' });
+
+  const agenda = loadAgenda();
+  const novoEvento = {
+    id: 'evt-' + crypto.randomUUID(),
+    titulo: titulo.slice(0, 80),
+    descricao: descricao || '',
+    dataInicio: dataInicio || new Date().toISOString(),
+    dataFim: dataFim || new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+    pasta: pasta || 'Geral',
+    arquivosRelacionados: [],
+    criadoEm: new Date().toISOString()
+  };
+
+  agenda.eventos.unshift(novoEvento);
+  saveAgenda(agenda);
+
+  res.json({ success: true, evento: novoEvento });
+});
+
+// Atualizar evento
+app.put('/api/agenda/:id', authenticateToken, (req, res) => {
+  const { id } = req.params;
+  const { titulo, descricao, dataInicio, dataFim, pasta } = req.body;
+
+  let agenda = loadAgenda();
+  const index = agenda.eventos.findIndex(e => e.id === id);
+
+  if (index === -1) return res.status(404).json({ error: 'Evento não encontrado.' });
+
+  if (titulo !== undefined) agenda.eventos[index].titulo = titulo.slice(0, 80);
+  if (descricao !== undefined) agenda.eventos[index].descricao = descricao;
+  if (dataInicio !== undefined) agenda.eventos[index].dataInicio = dataInicio;
+  if (dataFim !== undefined) agenda.eventos[index].dataFim = dataFim;
+  if (pasta !== undefined) agenda.eventos[index].pasta = pasta;
+
+  agenda.eventos[index].atualizadoEm = new Date().toISOString();
+  saveAgenda(agenda);
+
+  res.json({ success: true, evento: agenda.eventos[index] });
+});
+
+// Excluir evento
+app.delete('/api/agenda/:id', authenticateToken, (req, res) => {
+  const { id } = req.params;
+
+  let agenda = loadAgenda();
+  const initialLength = agenda.eventos.length;
+  agenda.eventos = agenda.eventos.filter(e => e.id !== id);
+
+  if (agenda.eventos.length === initialLength) {
+    return res.status(404).json({ error: 'Evento não encontrado.' });
+  }
+
+  saveAgenda(agenda);
+  res.json({ success: true, message: 'Evento excluído.' });
+});
+
+// ------------------- ROTA DE CHAT COM GEMINI -------------------
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`=========================================`);

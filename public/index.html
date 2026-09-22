@@ -80,6 +80,14 @@
       </div>
 
       <div class="header-right">
+        <button id="btn-sidebar-toggle" class="btn-secondary" title="Abrir/Fechar Menu" aria-label="Abrir menu" style="display: none;">
+          <i class="fa-solid fa-bars"></i>
+          <span>Menu</span>
+        </button>
+        <button id="btn-agenda" class="btn-secondary" title="Abrir Agenda">
+          <i class="fa-solid fa-calendar"></i>
+          <span>Agenda</span>
+        </button>
         <button id="btn-mission-directives" class="btn-secondary" title="Configurar Diretrizes da Missão">
           <i class="fa-solid fa-sliders"></i>
           <span>Diretrizes</span>
@@ -311,6 +319,57 @@
       <div class="modal-footer">
         <button id="btn-reset-directives" class="btn-ghost">Restaurar Padrão</button>
         <button id="btn-save-directives" class="btn-primary">Salvar Diretrizes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: AGENDA ================== -->
+  <div id="modal-agenda" class="modal-overlay hidden">
+    <div class="modal-card modal-card-lg">
+      <div class="modal-header">
+        <div class="modal-title">
+          <i class="fa-solid fa-calendar"></i>
+          <h3>Minhas Missões & Eventos</h3>
+        </div>
+        <button id="btn-close-agenda-modal" class="btn-icon">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <form id="agenda-form">
+          <div class="input-group">
+            <label for="agenda-titulo">Título</label>
+            <input type="text" id="agenda-titulo" placeholder="Título do evento" maxlength="80">
+          </div>
+          <div class="input-group">
+            <label for="agenda-descricao">Descrição</label>
+            <textarea id="agenda-descricao" rows="3" placeholder="Descrição opcional do evento"></textarea>
+          </div>
+          <div class="input-group">
+            <label for="agenda-data-inicio">Data Início</label>
+            <input type="datetime-local" id="agenda-data-inicio">
+          </div>
+          <div class="input-group">
+            <label for="agenda-data-fim">Data Fim</label>
+            <input type="datetime-local" id="agenda-data-fim">
+          </div>
+          <div class="input-group">
+            <label for="agenda-pasta">Pasta</label>
+            <select id="agenda-pasta">
+              <option value="Geral">Geral</option>
+              <!-- Pastas serão populadas pelo JavaScript -->
+            </select>
+          </div>
+        </form>
+        <div class="agenda-toolbar">
+          <span>PROXIMOS EVENTOS</span>
+          <button id="btn-novo-evento" class="btn-tool-sm" title="Criar Novo Evento">
+            <i class="fa-solid fa-plus"></i> Novo
+          </button>
+        </div>
+        <div id="agenda-list" class="agenda-list">
+          <!-- Eventos renderizados aqui -->
+        </div>
       </div>
     </div>
   </div>
